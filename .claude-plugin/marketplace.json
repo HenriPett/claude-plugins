@@ -1,0 +1,25 @@
+{
+  "name": "henrique-plugins",
+  "owner": {
+    "name": "henriquepett"
+  },
+  "metadata": {
+    "description": "Plugins locais do Henrique para o Claude Code."
+  },
+  "plugins": [
+    {
+      "name": "savvy-progress",
+      "source": "./plugins/savvy-progress",
+      "description": "Barra de progresso e painel de subagentes (fork de johnnyvizz/claude-kit) que abre em toda sessão.",
+      "version": "1.3.0",
+      "category": "mod"
+    },
+    {
+      "name": "voz-para-prompt",
+      "source": "./plugins/voz-para-prompt",
+      "description": "Reorganiza pedidos longos ditados por voz num prompt claro antes de o Claude começar a trabalhar.",
+      "version": "0.3.0",
+      "category": "mod"
+    }
+  ]
+}

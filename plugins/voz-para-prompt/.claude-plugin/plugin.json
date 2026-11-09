@@ -1,0 +1,49 @@
+{
+  "name": "voz-para-prompt",
+  "version": "0.3.0",
+  "description": "Reorganiza pedidos longos ditados por voz num prompt claro (objetivo, contexto, passos, restrições) antes de o Claude começar a trabalhar.",
+  "author": {
+    "name": "henriquepett"
+  },
+  "userConfig": {
+    "modo": {
+      "type": "string",
+      "title": "Quando reorganizar",
+      "description": "auto: só pedidos longos com cara de fala (vícios, autocorreções, pouca pontuação); sempre: todo pedido longo; desligado: nunca (o prefixo voz: ainda força)",
+      "default": "auto",
+      "options": [
+        "auto",
+        "sempre",
+        "desligado"
+      ]
+    },
+    "minPalavras": {
+      "type": "number",
+      "title": "Tamanho mínimo (palavras)",
+      "description": "Pedidos com menos palavras que isso passam direto",
+      "default": 30
+    },
+    "contexto": {
+      "type": "string",
+      "title": "O que a reescrita lê",
+      "description": "conversa: a conversa inteira, no modelo da sessão (entende referências; mais caro e lento); so-transcricao: só o áudio, no modelo abaixo (rápido e barato)",
+      "default": "conversa",
+      "options": [
+        "conversa",
+        "so-transcricao"
+      ]
+    },
+    "modelo": {
+      "type": "string",
+      "title": "Modelo da reescrita sem conversa",
+      "description": "Usado com contexto so-transcricao e quando não há conversa para ler (primeira mensagem). haiku é rápido e barato; sonnet reescreve melhor pedidos muito confusos",
+      "default": "haiku",
+      "options": [
+        "haiku",
+        "sonnet"
+      ]
+    }
+  },
+  "types": "./types/index.d.ts",
+  "license": "MIT"
+}
