@@ -14,6 +14,9 @@ export type Flow = {
   phase: Phase
   isFinished: boolean
   tasks: PlannedTask[]
+  /** Drawn from the agents list (no savvy-flow report): counts every subagent started since `since`. */
+  isAuto?: boolean
+  since?: number
 }
 
 export type AgentStatus = 'running' | 'done' | 'failed'

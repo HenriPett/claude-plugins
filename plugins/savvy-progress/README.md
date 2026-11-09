@@ -2,8 +2,8 @@
 
 A Claude Code mod: a progress bar above the prompt and a live panel of subagents. Made for the [savvy-flow](../savvy-flow) skill, and useful with any subagents.
 
-- **Progress bar**: the flow's title, phase, accepted tasks out of planned, and a button with the crew size that opens the panel. It appears once something reports progress (savvy-flow does) or a `savvy-*` worker starts.
-- **Agents panel** (`/agents-info` toggles it; `/agents-info open` opens it or brings it forward without toggling): running, finished and planned subagents with model, effort, task progress, context, estimated cost and time. Working crabs walk, and each savvy tier animates its prop: the astronaut floats, the detective sweeps the magnifier, the engineer turns the wrench, the chef tosses the omelette, the racer runs with a fluttering flag. `prefers-reduced-motion` stops them.
+- **Progress bar**: the flow's title, phase, accepted tasks out of planned, and a button with the crew size that opens the panel. With savvy-flow it shows what the flow reports; without it, any subagent brings it up, counting the agents started and finished since the bar appeared.
+- **Agents panel** (`/agents-info` toggles it; `/agents-info open` opens it or brings it forward without toggling): running, finished and planned subagents with model, effort, task progress, context, estimated cost and time. Each agent is a pixel person drawn by role: the developer (`general-purpose`, `fork`, savvy workers) types on a laptop, the researcher (`Explore`) sweeps a magnifier, the architect (`Plan`) draws a blueprint, the reviewer (`auditor`, review agents) ticks a clipboard, the guide (`claude-code-guide`) reads a book, anyone else waves. The shirt carries the savvy tier's color, and skin and hair vary per run. `prefers-reduced-motion` stops the motion.
 
 ## Tools it adds
 
@@ -14,7 +14,7 @@ Cost is a rough estimate from token counts and a built-in per-model price table 
 
 ## Settings
 
-`language`: `auto` (default), `en`, `ru` or `he`. Hebrew draws the bar and the panel right to left. `auto` follows Claude Code's `language` setting, then the system locale, and falls back to English. Set it in `/config`, or, for a mod loaded by hand, in `~/.claude/settings.json`:
+`language`: `auto` (default), `en`, `pt`, `ru` or `he`. Hebrew draws the bar and the panel right to left. `auto` follows Claude Code's `language` setting, then the system locale, and falls back to English. Set it in `/config`, or, for a mod loaded by hand, in `~/.claude/settings.json`:
 
 ```json
 { "pluginConfigs": { "savvy-progress": { "options": { "language": "ru" } } } }

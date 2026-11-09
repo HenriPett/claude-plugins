@@ -44,7 +44,7 @@ type ProgressInput = {
 // Language: the `language` option, else Claude Code's `language` setting, else the
 // process locale; English when nothing says Hebrew or Russian.
 
-type Lang = 'en' | 'ru' | 'he'
+type Lang = 'en' | 'ru' | 'he' | 'pt'
 
 const STRINGS = {
   en: {
@@ -109,6 +109,37 @@ const STRINGS = {
     tier: { light: 'light', medium: 'medium', careful: 'careful', heavy: 'heavy', fable: 'fable', other: 'other' },
     effort: { low: 'low', medium: 'medium', high: 'high', xhigh: 'xhigh', max: 'max' },
   },
+  pt: {
+    pane: 'Agentes',
+    cost: 'Custo',
+    tokens: 'Tokens',
+    time: 'Tempo',
+    collapse: 'Recolher',
+    expand: 'Expandir',
+    running: 'Rodando',
+    finished: 'Concluídos',
+    planned: 'Planejados',
+    empty: 'Nenhum subagente ainda.',
+    round: 'rodada',
+    failed: 'erro',
+    after: 'depois de',
+    tokensWord: 'tokens',
+    agentsCount: 'agentes',
+    isRunning: 'rodando',
+    isFinished: 'concluído',
+    isPlanned: 'planejado',
+    opened: 'Painel de agentes aberto.',
+    closed: 'Painel de agentes fechado.',
+    done: 'Pronto',
+    plan: 'Plano',
+    design: 'Desenho',
+    tasks: 'Tarefas',
+    review: 'Revisão',
+    busy: 'rodando',
+    ctx: 'ctx',
+    tier: { light: 'light', medium: 'medium', careful: 'careful', heavy: 'heavy', fable: 'fable', other: 'outro' },
+    effort: { low: 'baixo', medium: 'médio', high: 'alto', xhigh: 'muito alto', max: 'máximo' },
+  },
   he: {
     pane: 'סוכנים',
     cost: 'עלות',
@@ -146,7 +177,7 @@ const STRINGS = {
 let lang: Lang = 'en'
 const tr = () => STRINGS[lang]
 
-// Hebrew draws every row mirrored: crab and title on the right, numbers on the left.
+// Hebrew draws every row mirrored: figure and title on the right, numbers on the left.
 const isRtl = () => lang === 'he'
 
 // Tier and effort words as shown; anything unknown shows as it came.
@@ -155,10 +186,11 @@ const effortWord = (effort: string): string => (tr().effort as Record<string, st
 
 const isRussian = (v: unknown): boolean => typeof v === 'string' && /^(ru|russian|рус)/i.test(v.trim())
 const isHebrew = (v: unknown): boolean => typeof v === 'string' && /^(he|iw|hebrew|עברית)/i.test(v.trim())
-const langOf = (v: unknown): Lang => (isHebrew(v) ? 'he' : isRussian(v) ? 'ru' : 'en')
+const isPortuguese = (v: unknown): boolean => typeof v === 'string' && /^(pt|portugu)/i.test(v.trim())
+const langOf = (v: unknown): Lang => (isHebrew(v) ? 'he' : isRussian(v) ? 'ru' : isPortuguese(v) ? 'pt' : 'en')
 
 async function detectLang($: EngineInterface, option: unknown): Promise<Lang> {
-  if (option === 'en' || option === 'ru' || option === 'he') return option
+  if (option === 'en' || option === 'ru' || option === 'he' || option === 'pt') return option
   try {
     const settings = (await $.settings.read()) as Record<string, unknown>
     if (typeof settings.language === 'string' && settings.language.trim()) return langOf(settings.language)
@@ -180,7 +212,7 @@ const blank = (): Flow => ({
 })
 
 const isNewFlow = (prev: Flow | null, input: ProgressInput): boolean =>
-  !prev || prev.isFinished || (input.title !== undefined && clip(input.title.trim(), MAX_TITLE) !== prev.title)
+  !prev || prev.isFinished || prev.isAuto === true || (input.title !== undefined && clip(input.title.trim(), MAX_TITLE) !== prev.title)
 
 // Only a known tier is kept: the name is later a key into the tier tables.
 const tierName = (v: string): string => {
@@ -225,6 +257,16 @@ const label = (f: Flow): string => {
   return `${f.phase === 'review' ? s.review : s.tasks} ${count}`
 }
 
+// A flow nobody reports (any subagent, no savvy-flow plan) is counted from the
+// agents list: every run started since the flow began, finished ones as done.
+const shownFlow = (f: Flow, list: AgentRun[]): Flow => {
+  if (!f.isAuto) return f
+  const runs = list.filter(a => a.startedAt >= (f.since ?? 0))
+  const running = runs.filter(a => a.status === 'running').length
+  const done = runs.length - running
+  return { ...f, title: tr().pane, total: runs.length, done, running, phase: 'delegate', isFinished: runs.length > 0 && running === 0 }
+}
+
 const ratio = (f: Flow): number => (f.isFinished ? 1 : f.total ? f.done / f.total : 0)
 
 // Deterministic noise so the dither does not shimmer between redraws.
@@ -234,13 +276,11 @@ const noise = (x: number, y: number): number => {
 }
 
 // The whole row is one SVG: the desktop wraps sibling elements onto new lines,
-// so title, bar, percent and the crab live in one drawing; only the count and
+// so title, bar, percent and the figure live in one drawing; only the count and
 // the dismiss are Buttons beside it.
 const H = 22
 const BAR_H = 16
-const CRAB_W = 26
-// The crab's drawing grid is 30 units wide, props included.
-const CRAB_BOX = 30
+const FIG_W = 26
 const CELL = 3
 const FONT = "-apple-system,BlinkMacSystemFont,'SF Pro Text','Segoe UI',sans-serif"
 
@@ -271,11 +311,13 @@ const fitText = (s: string, size: number, maxW: number): string => {
   return out + '…'
 }
 
-const rowSvg = (f: Flow, W: number, isWorking: boolean): string => {
+type Who = { role: Role; color: string; seed: string }
+
+const rowSvg = (f: Flow, W: number, who: Who, isWorking: boolean): string => {
   // The title takes what it needs, up to 40% of the row; the bar takes the rest.
   const title = fitText(f.title, 13, Math.max(60, W * 0.4))
   const BAR_X = Math.round(16 + textWidth(title, 13) + 12)
-  const BAR_W = Math.max(60, W - BAR_X - 46 - CRAB_W)
+  const BAR_W = Math.max(60, W - BAR_X - 46 - FIG_W)
   const color = f.isFinished ? DONE : ACCENT
   const y0 = (H - BAR_H) / 2
   const fillW = Math.round(BAR_W * ratio(f))
@@ -316,8 +358,8 @@ const rowSvg = (f: Flow, W: number, isWorking: boolean): string => {
   const percent = `${Math.round(ratio(f) * 100)}%`
   // `direction="rtl"` puts Hebrew words and numbers in reading order; `start` is then the right edge.
   const titleAt = rtl ? `x="${W - 16}" direction="rtl" text-anchor="start"` : 'x="16"'
-  const percentAt = rtl ? `x="${CRAB_W + 6}" y="${H / 2 + 4.5}"` : `x="${W - CRAB_W - 6}" y="${H / 2 + 4.5}" text-anchor="end"`
-  const crabW = CRAB_BOX * 0.8
+  const percentAt = rtl ? `x="${FIG_W + 6}" y="${H / 2 + 4.5}"` : `x="${W - FIG_W - 6}" y="${H / 2 + 4.5}" text-anchor="end"`
+  const figW = FIG_BOX * 0.8
 
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
 <style>
@@ -343,7 +385,7 @@ const rowSvg = (f: Flow, W: number, isWorking: boolean): string => {
 <text x="${pillX + pillW / 2}" y="${BAR_H / 2 + 4}" text-anchor="middle"${rtl ? ' direction="rtl"' : ''} font-family="${FONT}" font-size="11" font-weight="600" fill="#ffffff">${xml(text)}</text>
 </g>
 <text class="m" ${percentAt} font-family="${FONT}" font-size="12.5" font-variant-numeric="tabular-nums">${percent}</text>
-${CRAB_CSS}${crab(rx(W - CRAB_W + 1, crabW), 0, 'other', false, isWorking, 0.8, rtl)}
+${FIG_CSS}${figure(rx(W - FIG_W + 1, figW), 0, who.role, who.color, who.seed, false, isWorking, 0.8, rtl)}
 </svg>`
 }
 
@@ -509,127 +551,218 @@ const PANE_CSS = `<style>
 @media (prefers-reduced-motion: reduce){.live{animation:none}}
 </style>`
 
-// Pixel Clawd from DockCrab (Clawdy): a 24×18 crab on a 30×28 grid, one costume per tier.
-// The body keeps the brand clay; the tier's color lives in the costume's accent.
-const CLAY = '#D97757'
+// Pixel people on a 30×28 grid, one role per kind of agent: the developer types on a
+// laptop, the researcher sweeps a magnifier, the architect draws a blueprint, the
+// reviewer ticks a clipboard, the guide reads a book, anyone else waves. Skin, hair
+// and hairstyle come from the run's id, so each agent is its own person.
 const INK = '#1F1E1D'
+const PANTS = '#3B4252'
 
-// `cls` puts a pixel in a named group: `bd` (the default) is the body and its
-// costume, `la`/`lb` the leg pairs, anything else a prop with its own motion.
+type Role = 'dev' | 'explore' | 'plan' | 'review' | 'guide' | 'other'
+
+const ROLE_COLOR: Record<Role, string> = {
+  dev: '#5B6CF0',
+  explore: '#1D9E75',
+  plan: '#D85A30',
+  review: '#7F77DD',
+  guide: '#0F9BA8',
+  other: '#888780',
+}
+
+// `general-purpose`, `fork`, savvy workers: the ones that write code are developers.
+const roleOf = (type: string): Role => {
+  const t = type.replace(/^[^:]*:/, '').toLowerCase()
+  if (t.startsWith('savvy-')) return 'dev'
+  if (/explor|research|search|scout|pesquis|find/.test(t)) return 'explore'
+  if (/^plan$|planner|architect|design/.test(t)) return 'plan'
+  if (/audit|review|verif|secur|test|qa|lint/.test(t)) return 'review'
+  if (/guide|help|docs|setup|statusline|tutor/.test(t)) return 'guide'
+  if (!t || /general|claude|fork|code|dev|engineer|implement|worker|fix|build|refactor|teammate/.test(t)) return 'dev'
+  return 'other'
+}
+
+const SKINS = ['#F3CBA9', '#E2AC82', '#C68863', '#8D5A3B']
+const HAIRS = ['#2B211B', '#5A3A22', '#C9893F', '#1F1E1D', '#A23B2A', '#8A8A86']
+
+const hash = (s: string): number => [...s].reduce((h, ch) => (Math.imul(h, 31) + ch.charCodeAt(0)) >>> 0, 7)
+
+type Look = { skin: string; hair: string; style: number; shirt: string }
+
+const lookOf = (seed: string, shirt: string): Look => {
+  const h = hash(seed)
+  return { skin: SKINS[h % SKINS.length] ?? SKINS[0]!, hair: HAIRS[(h >>> 3) % HAIRS.length] ?? INK, style: (h >>> 7) % 3, shirt }
+}
+
+// `cls` puts a pixel in a named group: `bd` (the default) is the body and what it
+// wears, `la`/`lb` the legs, anything else a prop with its own motion.
 type Fill = (x: number, y: number, w: number, h: number, c: string, cls?: string) => void
 
 const stamp = (f: Fill, x: number, y: number, rows: string[], map: Record<string, string>, cls?: string): void =>
   rows.forEach((row, dy) => [...row].forEach((ch, dx) => map[ch] && f(x + dx, y + dy, 1, 1, map[ch] ?? '', cls)))
 
-// `armCls` lets a raised claw travel with the prop it holds.
-const crabBody = (f: Fill, armFront = 0, armCls?: string): void => {
-  f(7, 10, 16, 12, CLAY)
-  f(3, 14, 4, 4, CLAY)
-  f(23, 14 + armFront, 4, 4, CLAY, armCls)
-  f(9, 12, 2, 2, INK)
-  f(19, 12, 2, 2, INK)
-  f(7, 22, 2, 4, CLAY, 'la')
-  f(17, 22, 2, 4, CLAY, 'la')
-  f(11, 22, 2, 4, CLAY, 'lb')
-  f(21, 22, 2, 4, CLAY, 'lb')
+type Arms = { left?: string | false; right?: string | false }
+
+// Head x11-18 y5-12, torso x10-19 y14-21, arms x7-8 and x21-22, legs to y26.
+// An arm's class makes it move; `false` leaves it out for the role to draw.
+const personBody = (f: Fill, k: Look, arms: Arms = {}): void => {
+  // Hair behind the head first: long hair falls past the ears.
+  if (k.style === 1) { f(10, 4, 1, 10, k.hair); f(19, 4, 1, 10, k.hair) }
+  f(11, 5, 8, 8, k.skin)
+  if (k.style === 2) {
+    stamp(f, 9, 1, ['..hhhhhhhh..', '.hhhhhhhhhh.', 'hhhhhhhhhhhh', 'hhhhhhhhhhhh', 'hh........hh', 'h..........h'], { h: k.hair })
+  } else {
+    f(12, 2, 6, 1, k.hair); f(11, 3, 8, 2, k.hair); f(10, 4, 1, 3, k.hair); f(19, 4, 1, 3, k.hair); f(11, 5, 4, 1, k.hair)
+  }
+  f(13, 8, 1, 2, INK); f(16, 8, 1, 2, INK)
+  f(14, 11, 2, 1, 'rgba(0,0,0,.28)')
+  f(14, 13, 2, 1, k.skin)
+  f(10, 14, 10, 8, k.shirt)
+  f(10, 14, 10, 1, 'rgba(255,255,255,.18)')
+  f(10, 21, 10, 1, 'rgba(0,0,0,.22)')
+  if (arms.left !== false) { f(7, 15, 2, 6, k.shirt, arms.left); f(7, 21, 2, 1, k.skin, arms.left) }
+  if (arms.right !== false) { f(21, 15, 2, 6, k.shirt, arms.right); f(21, 21, 2, 1, k.skin, arms.right) }
+  f(11, 22, 3, 4, PANTS, 'la'); f(10, 26, 4, 1, INK, 'la')
+  f(16, 22, 3, 4, PANTS, 'lb'); f(16, 26, 4, 1, INK, 'lb')
 }
 
 // Pure CSS, run by the compositor: no redraws. Periods divide one second, so the
-// once-a-second redraw of a running row restarts them in phase. Every crab walks;
-// each costume adds its prop's own motion on top.
-const CRAB_CSS = `<style>
-.run .la{animation:st .5s steps(1) infinite}.run .lb{animation:st .5s steps(1) infinite -.25s}
-.run .bd{animation:bob .5s steps(1) infinite -.125s}
+// once-a-second redraw of a running row restarts them in phase.
+const FIG_CSS = `<style>
 .run g{transform-box:fill-box}
 @keyframes st{50%{transform:translateY(-1px)}}@keyframes bob{50%{transform:translateY(1px)}}
-.c-fable.run{animation:float 1s ease-in-out infinite}
-.c-fable.run .la,.c-fable.run .lb,.c-fable.run .bd{animation:none}
-.c-fable.run .ant{animation:blink 1s steps(1) infinite}
-.c-fable.run .star{animation:blink .5s steps(1) infinite -.25s}
-@keyframes float{50%{transform:translateY(-2px)}}@keyframes blink{50%{opacity:.15}}
-.c-heavy.run .it{animation:scan 1s steps(1) infinite}
-.c-heavy.run .gl{animation:blink 1s steps(1) infinite -.5s}
+@keyframes blink{50%{opacity:.15}}
+.walk.run .la{animation:st .5s steps(1) infinite}.walk.run .lb{animation:st .5s steps(1) infinite -.25s}
+.walk.run .bd{animation:bob .5s steps(1) infinite -.125s}
+.r-dev.run .ha{animation:st .25s steps(1) infinite}.r-dev.run .hb{animation:st .25s steps(1) infinite -.125s}
+.r-dev.run .scr{animation:blink 1s steps(1) infinite}
+.r-dev.run .d1,.r-dev.run .d2,.r-dev.run .d3{opacity:.15;animation:dot 1s steps(1) infinite}
+.r-dev.run .d2{animation-delay:.25s}.r-dev.run .d3{animation-delay:.5s}
+@keyframes dot{0%,40%{opacity:1}50%,100%{opacity:.15}}
+.r-explore.run .it{animation:scan 1s steps(1) infinite}.r-explore.run .gl{animation:blink 1s steps(1) infinite -.5s}
 @keyframes scan{25%{transform:translate(-1px,1px)}50%{transform:translate(-2px,2px)}75%{transform:translate(-1px,1px)}}
-.c-careful.run .it{transform-origin:100% 100%;animation:twist .5s ease-in-out infinite}
-@keyframes twist{50%{transform:rotate(-35deg)}}
-.c-medium.run .pan{transform-origin:0 50%;animation:tilt 1s ease-in-out infinite}
-.c-medium.run .egg{animation:flip 1s ease-in-out infinite}
-@keyframes tilt{20%,40%{transform:rotate(-12deg)}}@keyframes flip{30%{transform:translateY(-5px) scaleY(-1)}60%{transform:translateY(0)}}
-.c-light.run .la{animation-duration:.25s}.c-light.run .lb{animation-duration:.25s;animation-delay:-.125s}
-.c-light.run .flag{transform-origin:0 50%;animation:wave .25s steps(1) infinite}
-@keyframes wave{50%{transform:skewY(-12deg) scaleX(.85)}}
-.c-explore.run .it{transform-origin:50% 100%;animation:fence .5s ease-in-out infinite}
-@keyframes fence{50%{transform:rotate(25deg)}}
+.r-plan.run .bd{animation:bob 1s steps(1) infinite}
+.r-plan.run .pn{animation:draw 1s steps(4) infinite}
+@keyframes draw{0%{transform:translateX(0)}100%{transform:translateX(-8px)}}
+.r-review.run .bd{animation:bob 1s steps(1) infinite}
+.r-review.run .ck{animation:blink 1s steps(1) infinite}
+.r-review.run .pn{transform-origin:50% 0;animation:tick .5s ease-in-out infinite}
+@keyframes tick{50%{transform:rotate(-25deg)}}
+.r-guide.run .bd{animation:bob 1s steps(1) infinite}
+.r-guide.run .pg{transform-origin:0 50%;animation:flip 1s ease-in-out infinite}
+.r-guide.run .ts{transform-origin:50% 0;animation:tick .5s ease-in-out infinite}
+@keyframes flip{40%,60%{transform:scaleX(-1)}}
+.r-other.run .wv{transform-origin:50% 100%;animation:wave .5s ease-in-out infinite}
+@keyframes wave{50%{transform:rotate(18deg)}}
 @media (prefers-reduced-motion: reduce){.run,.run g{animation:none!important}}
 </style>`
 
-const COSTUMES: Record<string, (f: Fill, t: string) => void> = {
-  // Fable: astronaut in a glass dome; floats instead of walking, the antenna and the star blink.
-  fable: (f, t) => {
-    crabBody(f)
-    f(6, 7, 18, 1, '#E6E8EE'); f(5, 8, 1, 14, '#E6E8EE'); f(24, 8, 1, 14, '#E6E8EE'); f(6, 22, 18, 1, '#C9CCD2')
-    f(6, 8, 18, 14, 'rgba(169,214,245,.32)'); f(8, 9, 2, 1, '#fff'); f(8, 10, 1, 2, '#fff')
-    f(14, 4, 2, 3, '#C9CCD2'); f(14, 2, 2, 2, t, 'ant'); f(13, 18, 4, 2, t)
-    f(27, 3, 1, 3, '#F5C542', 'star'); f(26, 4, 3, 1, '#F5C542', 'star')
+const ROLES: Record<Role, { walks: boolean; draw: (f: Fill, k: Look, c: string) => void }> = {
+  // Developer: hoodie and headphones, typing behind a laptop; dots show it is busy.
+  dev: {
+    walks: false,
+    draw: (f, k, c) => {
+      personBody(f, k, { left: 'ha', right: 'hb' })
+      f(13, 15, 1, 3, '#F4F3EE'); f(16, 15, 1, 3, '#F4F3EE')
+      f(11, 1, 8, 1, '#2B2B2E'); f(10, 2, 1, 3, '#2B2B2E'); f(19, 2, 1, 3, '#2B2B2E')
+      f(9, 6, 2, 4, '#2B2B2E'); f(19, 6, 2, 4, '#2B2B2E'); f(9, 7, 1, 2, c); f(20, 7, 1, 2, c)
+      f(9, 17, 12, 7, '#C9CCD2'); f(9, 17, 12, 1, '#E6E8EE'); f(6, 24, 18, 1, '#8E929A'); f(5, 25, 20, 1, '#6E7178')
+      f(14, 19, 2, 2, '#FFFFFF', 'scr')
+      f(23, 5, 1, 1, c, 'd1'); f(25, 5, 1, 1, c, 'd2'); f(27, 5, 1, 1, c, 'd3')
+    },
   },
-  // Heavy: detective with a deerstalker; the magnifier sweeps and glints.
-  heavy: (f, t) => {
-    crabBody(f, -4, 'it')
-    stamp(f, 6, 3, ['......bbbbbb......', '....bbcbbcbbbb....', '...bbbbbbbbbbbb...', '..bcbbcbbcbbcbbb..', '.bbbbbbbbbbbbbbbb.', 'dddddddddddddddddd'], { b: '#7A4A26', c: '#A0703F', d: '#5A3519' })
-    f(6, 9, 18, 1, t)
-    stamp(f, 23, 1, ['.kkk.', 'k...k', 'k...k', 'k...k', '.kkk.'], { k: '#3A3A3C' }, 'it')
-    f(24, 2, 3, 3, 'rgba(169,214,245,.7)', 'it'); f(25, 6, 1, 4, '#7A4A26', 'it'); f(24, 2, 1, 1, '#fff', 'gl')
+  // Researcher: explorer hat, the magnifier raised and sweeping.
+  explore: {
+    walks: true,
+    draw: (f, k, c) => {
+      personBody(f, k, { right: false })
+      f(11, 1, 8, 3, '#A88452'); f(11, 3, 8, 1, c); f(8, 4, 14, 1, '#8A6A3D')
+      stamp(f, 20, 0, ['.kkk.', 'k...k', 'k...k', 'k...k', '.kkk.'], { k: '#3A3A3C' }, 'it')
+      f(21, 1, 3, 3, 'rgba(169,214,245,.75)', 'it'); f(22, 5, 1, 3, '#7A4A26', 'it')
+      f(21, 8, 2, 1, k.skin, 'it'); f(21, 9, 2, 6, k.shirt, 'it'); f(21, 1, 1, 1, '#FFFFFF', 'gl')
+    },
   },
-  // Careful: engineer in a hard hat; the wrench turns a bolt.
-  careful: (f, t) => {
-    crabBody(f)
-    stamp(f, 6, 4, ['.....yyyyyyyy.....', '...yyyyyhhyyyyy...', '..yyyyyyhhyyyyyy..', '..yyyyyyhhyyyyyy..', '.yyyyyyyhhyyyyyyy.', 'dddddddddddddddddd'], { y: '#F5C542', h: '#FBE08A', d: '#C99A1E' })
-    f(13, 5, 4, 2, t)
-    stamp(f, 0, 10, ['.s.s', 'sss.', '.s..', '.s..'], { s: '#8E929A' }, 'it')
+  // Architect: hard hat, a blueprint held up, the pencil drawing across it.
+  plan: {
+    walks: false,
+    draw: (f, k) => {
+      personBody(f, k)
+      f(12, 1, 6, 1, '#F5C542'); f(11, 2, 8, 3, '#F5C542'); f(14, 1, 2, 4, '#FBE08A'); f(9, 5, 12, 1, '#C99A1E')
+      f(7, 17, 16, 6, '#3D6FB6'); f(7, 17, 16, 1, '#5A8AD0')
+      f(9, 19, 12, 1, 'rgba(255,255,255,.35)'); f(12, 18, 1, 4, 'rgba(255,255,255,.35)'); f(17, 18, 1, 4, 'rgba(255,255,255,.35)')
+      f(10, 21, 6, 1, '#FFFFFF')
+      f(21, 14, 1, 4, '#F5C542', 'pn'); f(21, 18, 1, 1, INK, 'pn')
+    },
   },
-  // Medium: chef, the toque traced from DockCrab's Sprites.chefHat; tosses the omelette.
-  medium: (f, t) => {
-    crabBody(f, -4, 'pan')
-    stamp(f, 6, 0, ['........lll.......', '.......lllll......', '.wwwwgwwwwwwgwwwww', 'wwwwwwwwwwwwwwwwww', 'wwwwwwwwwwwwwwwwww', 'wwwwwgwwwwwggwwwww', '.wwwwgwwwwwggwwwww', '.dddbbbbbbbbbbbbb.', '.dddbbbbbbbbbbbbb.', '.dddbbbbbbbbbbbbb.'], { w: '#F4F3EE', l: '#F7F6F2', g: '#D2D1C8', b: t, d: '#B45F43' })
-    f(22, 8, 7, 2, '#4A4A48', 'pan'); f(26, 10, 1, 1, '#4A4A48', 'pan'); f(24, 7, 3, 1, '#F5B731', 'egg')
+  // Reviewer: glasses, a clipboard whose check blinks, the pen ticking.
+  review: {
+    walks: false,
+    draw: (f, k) => {
+      personBody(f, k)
+      f(12, 7, 6, 1, INK); f(12, 8, 2, 2, 'rgba(169,214,245,.55)'); f(16, 8, 2, 2, 'rgba(169,214,245,.55)')
+      f(2, 14, 7, 9, '#8A6A3D'); f(3, 15, 5, 7, '#F8F6F1'); f(4, 13, 3, 2, '#8E929A')
+      f(4, 16, 3, 1, '#B4B4B0'); f(4, 18, 3, 1, '#B4B4B0')
+      f(4, 20, 1, 1, '#3B9C5F', 'ck'); f(5, 21, 1, 1, '#3B9C5F', 'ck'); f(6, 20, 1, 1, '#3B9C5F', 'ck'); f(7, 19, 1, 1, '#3B9C5F', 'ck')
+      f(23, 17, 1, 5, '#2B2B2E', 'pn'); f(23, 22, 1, 1, '#F5C542', 'pn')
+    },
   },
-  // Light: racer in a helmet; runs at double pace, the checkered flag flutters.
-  light: (f, t) => {
-    crabBody(f, -4)
-    stamp(f, 6, 5, ['....rrrrrrrrrr....', '..rrrrrrwwrrrrrr..', '.rrrrrrrwwrrrrrrr.', '.rrrrrrrwwrrrrrrr.', '.rrrrrrrwwrrrrrrr.', '.kkkkkkkkkkkkkkkkr'], { r: t, w: '#F8F6F1', k: INK })
-    f(25, 1, 1, 9, '#8E929A')
-    stamp(f, 26, 1, ['wkwk', 'kwkw', 'wkwk'], { w: '#F8F6F1', k: INK }, 'flag')
+  // Guide: graduation cap, reading from an open book that turns its page.
+  guide: {
+    walks: false,
+    draw: (f, k, c) => {
+      personBody(f, k)
+      f(9, 2, 12, 1, INK); f(11, 3, 8, 2, INK); f(20, 2, 1, 4, '#F5C542', 'ts')
+      f(7, 18, 16, 6, c); f(8, 18, 6, 5, '#F8F6F1'); f(16, 18, 6, 5, '#F8F6F1'); f(14, 18, 2, 6, 'rgba(0,0,0,.25)')
+      f(9, 19, 4, 1, '#B4B4B0'); f(9, 21, 4, 1, '#B4B4B0'); f(17, 19, 4, 1, '#B4B4B0')
+      f(16, 18, 5, 5, '#ECE9DF', 'pg')
+    },
   },
-  // Explore: pirate scouting the code; the cutlass fences.
-  explore: f => {
-    crabBody(f)
-    stamp(f, 5, 3, ['.kk..............kk.', '.kkk....kkkk....kkk.', '..kkkkkkkwwkkkkkkk..', '..kkkkkkkkkkkkkkkk..', '.gggggggggggggggggg.'], { k: '#55514C', w: '#F8F6F1', g: '#F5C542' })
-    f(7, 11, 11, 1, INK); f(18, 11, 4, 3, INK)
-    f(27, 6, 1, 9, '#C9CCD2', 'it'); f(26, 15, 3, 1, '#7A4A26', 'it')
+  // Anyone else: a plain person waving.
+  other: {
+    walks: true,
+    draw: (f, k) => {
+      personBody(f, k, { right: false })
+      f(21, 8, 2, 7, k.shirt, 'wv'); f(21, 6, 2, 2, k.skin, 'wv')
+    },
   },
-  other: f => crabBody(f),
 }
 
-const costumeOf = (type: string): string => (type === 'Explore' ? 'explore' : tierOf(type))
+const FIG_SCALE = 1.1
+// The figures' drawing grid is 30 units wide, props included.
+const FIG_BOX = 30
 
-const CRAB_SCALE = 1.1
-
-// Body and props nest inside `bd` so a prop rides the bob and adds its own motion;
-// legs stay outside it and step on their own. `mirror` flips the crab inside its
-// own box (x .. x + CRAB_BOX * scale) so it faces left.
-const crab = (x: number, y: number, costume: string, dim = false, isWalking = false, scale = CRAB_SCALE, mirror = false): string => {
+// A person: `color` is the shirt (the savvy tier's or the role's), `seed` picks the face.
+// Body and props nest inside `bd` so a prop rides the body's motion and adds its own;
+// legs stay outside it. `mirror` flips the figure inside its box so it faces left.
+const figure = (
+  x: number,
+  y: number,
+  role: Role,
+  color: string,
+  seed: string,
+  dim = false,
+  isWorking = false,
+  scale = FIG_SCALE,
+  mirror = false,
+): string => {
   const groups = new Map<string, string[]>([['bd', []]])
   const f: Fill = (cx, cy, w, h, c, cls = 'bd') => {
     if (!groups.has(cls)) groups.set(cls, [])
     groups.get(cls)?.push(`<rect x="${cx}" y="${cy}" width="${w}" height="${h}" fill="${c}"/>`)
   }
-  const draw = COSTUMES[costume] ?? ((g: Fill) => crabBody(g))
-  draw(f, colorOf(costume))
+  const spec = ROLES[role]
+  spec.draw(f, lookOf(seed, color), color)
   const group = (cls: string) => `<g class="${cls}">${(groups.get(cls) ?? []).join('')}</g>`
   const props = [...groups.keys()].filter(k => k !== 'bd' && k !== 'la' && k !== 'lb')
   const body = `<g class="bd">${(groups.get('bd') ?? []).join('')}${props.map(group).join('')}</g>`
-  const place = mirror ? `translate(${x + CRAB_BOX * scale},${y}) scale(${-scale},${scale})` : `translate(${x},${y}) scale(${scale})`
-  return `<g transform="${place}" opacity="${dim ? 0.45 : 1}" shape-rendering="crispEdges"><g class="c-${costume}${isWalking ? ' run' : ''}">${body}${group('la')}${group('lb')}</g></g>`
+  const place = mirror ? `translate(${x + FIG_BOX * scale},${y}) scale(${-scale},${scale})` : `translate(${x},${y}) scale(${scale})`
+  const cls = `r-${role}${spec.walks ? ' walk' : ''}${isWorking ? ' run' : ''}`
+  return `<g transform="${place}" opacity="${dim ? 0.45 : 1}" shape-rendering="crispEdges"><g class="${cls}">${group('la')}${group('lb')}${body}</g></g>`
+}
+
+// A run's shirt: the savvy tier's color, else its role's.
+const runColor = (type: string): string => {
+  const tier = tierOf(type)
+  return tier === 'other' ? ROLE_COLOR[roleOf(type)] : colorOf(tier)
 }
 
 const statusMark = (x: number, y: number, status: string, color: string): string => {
@@ -655,14 +788,17 @@ const startText = (W: number, x: number, y: number, words = true): string =>
 const endText = (W: number, x: number, y: number, words = false): string =>
   !isRtl() ? `x="${x}" y="${y}" text-anchor="end"` : `x="${W - x}" y="${y}"${words ? ' direction="rtl" text-anchor="end"' : ''}`
 
-const crabWidth = (scale: number): number => Math.round(CRAB_BOX * scale * 100) / 100
+const figWidth = (scale: number): number => Math.round(FIG_BOX * scale * 100) / 100
 
-// A panel crab at x in a row of width W: on the mirrored side and facing left in Hebrew.
-const rowCrab = (W: number, x: number, y: number, costume: string, dim = false, isWalking = false): string =>
-  crab(mx(W, x, crabWidth(CRAB_SCALE)), y, costume, dim, isWalking, CRAB_SCALE, isRtl())
+// A panel figure at x in a row of width W: on the mirrored side and facing left in Hebrew.
+const rowFigure = (W: number, x: number, y: number, who: Who, dim = false, isWorking = false): string =>
+  figure(mx(W, x, figWidth(FIG_SCALE)), y, who.role, who.color, who.seed, dim, isWorking, FIG_SCALE, isRtl())
+
+const runWho = (a: AgentRun): Who => ({ role: roleOf(a.type), color: runColor(a.type), seed: a.id })
+const planWho = (tier: string, n: number): Who => ({ role: 'dev', color: colorOf(tier), seed: `plan-${n}` })
 
 const svg = (W: number, H: number, body: string): string =>
-  `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${PANE_CSS}${CRAB_CSS}${body}</svg>`
+  `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${PANE_CSS}${FIG_CSS}${body}</svg>`
 
 // The pane's own title already says "Agents": the header names the flow, if any.
 const headerSvg = (W: number, title: string, t: ReturnType<typeof totals>): string => {
@@ -696,7 +832,7 @@ const ctxOf = (a: AgentRun): number => (a.contextMax ? Math.min(100, Math.round(
 const agentSvg = (W: number, a: AgentRun, at: number): string => {
   const s = tr()
   const tier = tierOf(a.type)
-  const color = colorOf(tier)
+  const color = runColor(a.type)
   const ctx = ctxOf(a)
   const textW = W - 42 - 22
   const meta = [runModel(a)]
@@ -712,7 +848,7 @@ const agentSvg = (W: number, a: AgentRun, at: number): string => {
   return svg(
     W,
     66,
-    `${rowCrab(W, 0, 14, costumeOf(a.type), false, a.status === 'running')}
+    `${rowFigure(W, 0, 14, runWho(a), false, a.status === 'running')}
 <text class="t" ${startText(W, 42, 18)} font-family="${FONT}" font-size="13" font-weight="600">${xml(fitText(a.description || a.type, 13, textW))}</text>
 <text ${startText(W, 42, 34)} font-family="${FONT}" font-size="11"><tspan fill="${color}">${xml(tier === 'other' ? a.type : tierWord(tier))}</tspan><tspan class="s">  ${xml(meta.join('  ·  '))}</tspan></text>
 ${steps && stepsW > 30 ? `<text class="t" ${startText(W, 42, 49)} font-family="${FONT}" font-size="11" font-variant-numeric="tabular-nums">${xml(fitText(steps, 11, stepsW))}</text>` : ''}
@@ -732,7 +868,7 @@ const plannedSvg = (W: number, p: Planned): string => {
   return svg(
     W,
     46,
-    `${rowCrab(W, 0, 6, tier, true)}
+    `${rowFigure(W, 0, 6, planWho(tier, p.n), true)}
 <text class="s" ${startText(W, 42, 18)} font-family="${FONT}" font-size="13" font-weight="600">${xml(fitText(`${p.n}. ${p.title}`, 13, textW))}</text>
 <text ${startText(W, 42, 34)} font-family="${FONT}" font-size="11"><tspan fill="${color}">${xml(tierWord(tier))}</tspan><tspan class="m">  ${xml(meta.filter(Boolean).join('  ·  '))}</tspan></text>
 ${statusMark(mx(W, W - 8), 16, 'planned', color)}
@@ -742,15 +878,15 @@ ${statusMark(mx(W, W - 8), 16, 'planned', color)}
 
 const compactSvg = (W: number, list: AgentRun[], planned: Planned[], t: ReturnType<typeof totals>): string => {
   const icons = [
-    ...list.filter(a => a.status === 'running').map(a => ({ k: costumeOf(a.type), c: colorOf(tierOf(a.type)), s: 'running', dim: false })),
-    ...list.filter(a => a.status !== 'running').map(a => ({ k: costumeOf(a.type), c: colorOf(tierOf(a.type)), s: a.status, dim: false })),
-    ...planned.map(p => ({ k: p.tier in TIER_COLOR ? p.tier : 'other', c: colorOf(p.tier), s: 'planned', dim: true })),
+    ...list.filter(a => a.status === 'running').map(a => ({ k: runWho(a), c: runColor(a.type), s: 'running', dim: false })),
+    ...list.filter(a => a.status !== 'running').map(a => ({ k: runWho(a), c: runColor(a.type), s: a.status, dim: false })),
+    ...planned.map(p => ({ k: planWho(p.tier in TIER_COLOR ? p.tier : 'other', p.n), c: colorOf(p.tier), s: 'planned', dim: true })),
   ]
   const fit = Math.max(1, Math.floor((W - 150) / 36))
   const shown = icons.slice(0, fit)
   const more = icons.length - shown.length
   const body = shown
-    .map((ic, i) => rowCrab(W, i * 36, 0, ic.k, ic.dim, ic.s === 'running') + (ic.s === 'running' ? `<circle class="live" cx="${mx(W, i * 36 + 32)}" cy="4" r="3" fill="${ic.c}"/>` : ''))
+    .map((ic, i) => rowFigure(W, i * 36, 0, ic.k, ic.dim, ic.s === 'running') + (ic.s === 'running' ? `<circle class="live" cx="${mx(W, i * 36 + 32)}" cy="4" r="3" fill="${ic.c}"/>` : ''))
     .join('')
   const x = shown.length * 36 + (more ? 4 : 0)
   return svg(
@@ -949,6 +1085,15 @@ export const register: Register = (on, options) => {
       }
       return [...list.filter(a => a.id !== run.id), run].slice(-200)
     })
+    // Any subagent gets the bar: a savvy flow in progress keeps it, else an auto flow
+    // counts the runs (a finished or dismissed one starts over with this run).
+    const runId = started.agentId ?? e.tool_use_id
+    const others = (await read($, agents)).filter(a => a.id !== runId)
+    await update($, flow, (prev): Flow | null => {
+      if (prev && !prev.isFinished && !prev.isAuto) return prev
+      if (prev?.isAuto && !shownFlow(prev, others).isFinished) return prev
+      return { ...blank(), title: tr().pane, phase: 'delegate', isAuto: true, since: at }
+    })
     await update($, now, () => at)
     if (e.subagentType.startsWith('savvy-')) {
       const f = await read($, flow)
@@ -1034,7 +1179,8 @@ export const register: Register = (on, options) => {
     const ui = $.ui.resolve(e)
     const { Box, Text, Button } = ui
     const list = await read($, agents)
-    const f = await read($, flow)
+    const stored = await read($, flow)
+    const f = stored && shownFlow(stored, list)
     const p: Panel = await read($, panel)
     const at = Math.max(await read($, now), ...list.map(a => a.startedAt), 0)
 
@@ -1043,7 +1189,7 @@ export const register: Register = (on, options) => {
     const planned = plannedOf(f, list)
     const t = totals(list, at)
     // The pane's title says "Agents"; inside, only the flow's own name.
-    const title = f && !f.isFinished ? f.title : ''
+    const title = f && !f.isFinished && !f.isAuto ? f.title : ''
 
     const toggleCompact = (
       <Button
@@ -1120,7 +1266,7 @@ export const register: Register = (on, options) => {
     const barW = Math.max(6, Math.min(20, cols - 34))
     const row = (a: AgentRun) => {
       const tier = tierOf(a.type)
-      const color = colorOf(tier)
+      const color = runColor(a.type)
       const ctx = ctxOf(a)
       const progress = progressOf(a)
       const model = runModel(a)
@@ -1165,7 +1311,7 @@ export const register: Register = (on, options) => {
         {p.isCompact ? (
           <Text wrap="truncate-end">
             {[...running, ...finished].map(a => (
-              <Text key={a.id} color={colorOf(tierOf(a.type))}>
+              <Text key={a.id} color={runColor(a.type)}>
                 {STATUS_GLYPH[a.status]}{' '}
               </Text>
             ))}
@@ -1205,8 +1351,8 @@ export const register: Register = (on, options) => {
   })
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
-    const f = await read($, flow)
-    if (f === null || e.props.hasSurvey) return next(e)
+    const stored = await read($, flow)
+    if (stored === null || e.props.hasSurvey) return next(e)
     // Draw this row with the other mods' bands beneath it. Claude Code's own placeholder ({ type: 'engine' }) is
     // never nested: the desktop drops a band that nests it.
     const drawn = await Promise.resolve(next(e)).catch(() => null)
@@ -1215,8 +1361,12 @@ export const register: Register = (on, options) => {
     const ui = $.ui.resolve(e)
     const { Box, Text, Button } = ui
     const list = await read($, agents)
-    const crew = list.length + plannedOf(f, list).length
+    const f = shownFlow(stored, list)
+    const crew = (f.isAuto ? f.total : list.length) + plannedOf(f, list).length
     const isWorking = list.some(a => a.status === 'running')
+    // The figure at the bar's end is the newest running agent, else the newest one.
+    const lead = [...list].reverse().find(a => a.status === 'running') ?? list[list.length - 1]
+    const who: Who = lead ? runWho(lead) : { role: 'dev', color: ACCENT, seed: f.title }
     const crewButton = (
       <Button key="savvy-agents" label={`×${crew}`} plain onPress={() => void togglePane($)} />
     )
@@ -1240,7 +1390,7 @@ export const register: Register = (on, options) => {
       return (
         <Box flexDirection="column">
           <Box flexDirection={isRtl() ? 'row-reverse' : 'row'} alignItems="center" gap={1}>
-            <Svg source={rowSvg(f, width, isWorking)} alt={`${f.title}: ${label(f)}, ${percent}`} width={width} height={H} />
+            <Svg source={rowSvg(f, width, who, isWorking)} alt={`${f.title}: ${label(f)}, ${percent}`} width={width} height={H} />
             {crewButton}
             {dismiss}
           </Box>
@@ -1262,7 +1412,7 @@ export const register: Register = (on, options) => {
           <Text color={f.isFinished ? DONE : ACCENT}>{barText(f, width)}</Text>
           <Text bold>{label(f)}</Text>
           <Text dimColor>{percent}</Text>
-          <Text color={CLAY}>▣</Text>
+          <Text color={who.color}>▣</Text>
           {crewButton}
           {dismiss}
         </Box>

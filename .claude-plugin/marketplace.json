@@ -10,8 +10,8 @@
     {
       "name": "savvy-progress",
       "source": "./plugins/savvy-progress",
-      "description": "Barra de progresso e painel de subagentes (fork de johnnyvizz/claude-kit) que abre em toda sessão.",
-      "version": "1.3.0",
+      "description": "Barra de progresso para qualquer subagente e painel de agentes com um personagem por tipo (fork de johnnyvizz/claude-kit).",
+      "version": "1.4.0",
       "category": "mod"
     },
     {
