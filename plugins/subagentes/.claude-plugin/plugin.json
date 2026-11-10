@@ -1,0 +1,9 @@
+{
+  "name": "subagentes",
+  "version": "0.2.0",
+  "description": "Time de subagentes especializados (pesquisa, memória, implementação, depuração, revisão, verificação, redação) e um lembrete em todo pedido para a sessão principal delegar o trabalho não trivial em vez de fazê-lo sozinha.",
+  "author": {
+    "name": "henriquepett"
+  },
+  "license": "MIT"
+}

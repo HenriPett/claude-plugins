@@ -20,6 +20,13 @@
       "description": "Reorganiza pedidos longos ditados por voz num prompt claro antes de o Claude começar a trabalhar.",
       "version": "0.3.0",
       "category": "mod"
+    },
+    {
+      "name": "subagentes",
+      "source": "./plugins/subagentes",
+      "description": "Time de subagentes especializados e um lembrete em todo pedido para a sessão principal delegar o trabalho não trivial.",
+      "version": "0.2.0",
+      "category": "agents"
     }
   ]
 }

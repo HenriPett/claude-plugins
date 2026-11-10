@@ -5,6 +5,7 @@ Mods do Claude Code do Henrique, num marketplace só.
 | Mod | O que faz |
 | --- | --- |
 | [voz-para-prompt](plugins/voz-para-prompt) | Reorganiza pedidos longos ditados por voz num prompt claro antes de o Claude começar a trabalhar, com faixa e painel mostrando o antes e depois. |
+| [subagentes](plugins/subagentes) | Oito subagentes especializados (pesquisador-web, pesquisador-memoria, implementador, depurador, revisor, verificador, redator e o modo orquestrador) e um lembrete em todo pedido para a sessão principal delegar o trabalho não trivial. |
 | [savvy-progress](plugins/savvy-progress) | Barra de progresso acima do prompt e painel de subagentes que abre em toda sessão (fork de [johnnyvizz/claude-kit](https://github.com/johnnyvizz/claude-kit), MIT). |
 
 ## Instalar

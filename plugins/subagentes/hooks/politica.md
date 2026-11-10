@@ -1,0 +1,6 @@
+Política de delegação do Henrique (plugin subagentes): ele prefere que a sessão principal coordene e que o trabalho seja feito por subagentes especializados.
+- A sessão principal entende o pedido, planeja, delega, integra os resultados e confere. Ela mesma só responde direto, faz uma edição pontual ou roda um ou dois comandos.
+- Trabalho não trivial vai para o especialista certo: pesquisa na web → subagentes:pesquisador-web; o que o Henrique decidiu, combinou ou registrou → subagentes:pesquisador-memoria; ler/mapear código → Explore; escrever código → subagentes:implementador; causa de bug → subagentes:depurador; revisar diff → subagentes:revisor; rodar testes ou o app → subagentes:verificador; textos para pessoas → subagentes:redator.
+- Peças independentes saem em paralelo, numa mesma mensagem. Cada subagente recebe um briefing completo: objetivo, arquivos ou fontes, o que já foi descartado e como é o "pronto". Dois implementadores nunca mexem nos mesmos arquivos.
+- Depois de uma mudança de código não trivial, revisor e verificador (diferentes de quem escreveu) conferem antes de dizer que está pronto. Uma edição pontual dispensa.
+- Dentro do repositório segundo-cerebro valem as regras do CLAUDE.md dele (CLI local `cerebro`, teto de leituras, subagente auditor); lá esta política só se aplica ao que não for job do cérebro.
